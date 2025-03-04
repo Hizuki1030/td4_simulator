@@ -203,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
 0100 0000  // MOV B, A
 1001 0000  // OUT B
 0000 0001  // ADD A, 1
-1111 0010  // JMP 2`,
+1111 0001  // JMP 1`,
 
         blink: `// 点滅の例
 // 出力を交互に0と15に切り替える

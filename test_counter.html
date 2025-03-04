@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TD4 カウンターテスト</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .output {
+            font-family: 'Courier New', monospace;
+            background-color: #f0f0f0;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+            white-space: pre;
+            overflow-x: auto;
+        }
+        .register {
+            margin: 10px 0;
+        }
+        .register span {
+            font-family: 'Courier New', monospace;
+            background-color: #333;
+            color: #0f0;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+        }
+        button {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TD4 カウンターテスト</h1>
+        
+        <div class="registers">
+            <div class="register">
+                <label>A レジスタ:</label>
+                <span id="register-a">0000</span>
+            </div>
+            <div class="register">
+                <label>B レジスタ:</label>
+                <span id="register-b">0000</span>
+            </div>
+            <div class="register">
+                <label>プログラムカウンタ:</label>
+                <span id="program-counter">0000</span>
+            </div>
+            <div class="register">
+                <label>出力:</label>
+                <span id="output">0000</span>
+            </div>
+            <div class="register">
+                <label>キャリーフラグ:</label>
+                <span id="carry-flag">0</span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="step-btn">ステップ実行</button>
+            <button id="run-btn">実行</button>
+            <button id="reset-btn">リセット</button>
+        </div>
+        
+        <h2>実行ログ</h2>
+        <div id="execution-log" class="output"></div>
+    </div>
+    
+    <script src="td4.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize the TD4 processor
+            const td4 = new TD4();
+            
+            // UI elements
+            const registerAElement = document.getElementById('register-a');
+            const registerBElement = document.getElementById('register-b');
+            const programCounterElement = document.getElementById('program-counter');
+            const outputElement = document.getElementById('output');
+            const carryFlagElement = document.getElementById('carry-flag');
+            const executionLogElement = document.getElementById('execution-log');
+            
+            // Control buttons
+            const stepButton = document.getElementById('step-btn');
+            const runButton = document.getElementById('run-btn');
+            const resetButton = document.getElementById('reset-btn');
+            
+            // Execution state
+            let executionInterval = null;
+            
+            // Load the counter program
+            const counterProgram = `
+            // カウンターの例
+            // レジスタAを1ずつ増やし、出力する
+            0011 0000  // MOV A, 0
+            0100 0000  // MOV B, A
+            1001 0000  // OUT B
+            0000 0001  // ADD A, 1
+            1111 0010  // JMP 2
+            `;
+            
+            try {
+                const program = TD4.parseProgram(counterProgram);
+                td4.loadProgram(program);
+                log('カウンタープログラムをロードしました。');
+                log('プログラム内容:');
+                program.forEach((instruction, index) => {
+                    log(`${index.toString(16).toUpperCase()}: ${TD4.decimalToBinary8bit(instruction)}`);
+                });
+            } catch (error) {
+                log(`エラー: ${error.message}`);
+            }
+            
+            // Update UI with initial state
+            updateUI();
+            
+            // Event listeners
+            stepButton.addEventListener('click', handleStepExecution);
+            runButton.addEventListener('click', handleRunExecution);
+            resetButton.addEventListener('click', handleReset);
+            
+            /**
+             * Update the UI to reflect the current processor state
+             */
+            function updateUI() {
+                const state = td4.getState();
+                
+                // Update registers
+                registerAElement.textContent = TD4.decimalToBinary4bit(state.registerA);
+                registerBElement.textContent = TD4.decimalToBinary4bit(state.registerB);
+                programCounterElement.textContent = TD4.decimalToBinary4bit(state.programCounter);
+                outputElement.textContent = TD4.decimalToBinary4bit(state.output);
+                carryFlagElement.textContent = state.carryFlag.toString();
+                
+                // Update button states
+                runButton.textContent = state.running ? '停止' : '実行';
+                stepButton.disabled = state.running || state.halted;
+                
+                // If halted, stop execution
+                if (state.halted && state.running) {
+                    stopExecution();
+                }
+            }
+            
+            /**
+             * Handle step execution
+             */
+            function handleStepExecution() {
+                const beforeState = td4.getState();
+                const instruction = beforeState.memory[beforeState.programCounter];
+                const opcode = (instruction >> 4) & 0xF;
+                const immediate = instruction & 0xF;
+                
+                // Log the instruction being executed
+                log(`実行: PC=${TD4.decimalToBinary4bit(beforeState.programCounter)}, ` +
+                    `命令=${TD4.decimalToBinary8bit(instruction)}, ` +
+                    `オペコード=${opcode.toString(16).toUpperCase()}, ` +
+                    `オペランド=${immediate.toString(16).toUpperCase()}`);
+                
+                td4.step();
+                
+                const afterState = td4.getState();
+                
+                // Log the state change
+                log(`結果: A=${TD4.decimalToBinary4bit(afterState.registerA)}, ` +
+                    `B=${TD4.decimalToBinary4bit(afterState.registerB)}, ` +
+                    `出力=${TD4.decimalToBinary4bit(afterState.output)}, ` +
+                    `キャリー=${afterState.carryFlag}, ` +
+                    `次のPC=${TD4.decimalToBinary4bit(afterState.programCounter)}`);
+                
+                updateUI();
+            }
+            
+            /**
+             * Handle run/stop execution
+             */
+            function handleRunExecution() {
+                const state = td4.getState();
+                
+                if (state.running) {
+                    stopExecution();
+                } else {
+                    startExecution();
+                }
+            }
+            
+            /**
+             * Start continuous execution
+             */
+            function startExecution() {
+                if (td4.getState().halted) {
+                    return;
+                }
+                
+                td4.running = true;
+                updateUI();
+                log('実行開始');
+                
+                // Execute at a reasonable speed (5 instructions per second)
+                executionInterval = setInterval(() => {
+                    const shouldContinue = td4.step();
+                    updateUI();
+                    
+                    if (!shouldContinue) {
+                        stopExecution();
+                        log('実行停止: プロセッサが停止しました');
+                    }
+                }, 200);
+            }
+            
+            /**
+             * Stop execution
+             */
+            function stopExecution() {
+                if (executionInterval) {
+                    clearInterval(executionInterval);
+                    executionInterval = null;
+                }
+                
+                td4.running = false;
+                updateUI();
+                log('実行停止');
+            }
+            
+            /**
+             * Handle reset
+             */
+            function handleReset() {
+                stopExecution();
+                
+                try {
+                    const program = TD4.parseProgram(counterProgram);
+                    td4.loadProgram(program);
+                    log('プロセッサをリセットしました');
+                } catch (error) {
+                    log(`エラー: ${error.message}`);
+                }
+                
+                updateUI();
+            }
+            
+            /**
+             * Add a log message
+             */
+            function log(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                executionLogElement.textContent += `[${timestamp}] ${message}\n`;
+                executionLogElement.scrollTop = executionLogElement.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>
